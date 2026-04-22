@@ -1,0 +1,42 @@
+# jellyfin/compose.yaml
+# Jellyfin — open-source media server
+# https://jellyfin.org/docs/general/installation/container
+#
+# IMPORTANT - PUID/PGID = 0 (root)
+# Root is required for hardware transcoding device access (/dev/dri).
+# Without root, the container cannot open the DRI device and transcoding will fail.
+# If you don't use hardware transcoding, set PUID/PGID to your normal user values.
+#
+# IMPORTANT - network_mode: host
+# Host networking is used for better local network performance and client discovery.
+# Jellyfin's automatic discovery (UDP 7359) works more reliably with host networking.
+
+services:
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    network_mode: host # Better performance and client auto-discovery on local network
+    devices:
+      # NOTE: /dev/dri exposes the host GPU for hardware transcoding (Intel QSV, VA-API).
+      # Remove this section if your host has no GPU or you don't want hardware transcoding.
+      - /dev/dri:/dev/dri
+    environment:
+      # IMPORTANT: Root required for /dev/dri device access (hardware transcoding).
+      # Change to PUID=1000 / PGID=1000 if not using hardware transcoding.
+      - PUID=0
+      - PGID=0
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+    ports:
+      - "8096:8096"   # Web UI — informational only with host networking
+      - "7359:7359/udp" # Optional: Jellyfin client auto-discovery on local network
+    volumes:
+      - /opt/stacks/jellyfin/config:/config
+      - /opt/stacks/jellyfin/cache:/cache
+      # NOTE: Adjust these paths to your media library locations
+      - /mnt/nas-media/TV Shows:/_tvShows
+      - /mnt/nas-media/TV Shows 4K:/_4ktvShows
+      - /mnt/nas-media/Movies:/_movies
+      - /mnt/nas-media/Movies 4K:/_4kMovies
+      - /mnt/nas-media/Anime:/_anime
+      - /mnt/nas-media/Documentary:/_documentaryRealityTV

@@ -1,0 +1,113 @@
+# arr-stack/compose.yaml
+# The *arr media management suite — indexer management, TV, anime, and movie automation
+# https://wiki.servarr.com/
+#
+# This stack includes:
+#   - prowlarr:     indexer manager — syncs torrent/usenet sources to sonarr and radarr
+#   - sonarr1080:   TV show and documentary automation (1080p library)
+#   - sonarr_anime: dedicated anime TV show automation (separate instance, separate port)
+#   - radarr:       movie automation (all qualities/types)
+#   - bazarr:       subtitle automation — monitors sonarr and radarr libraries
+#
+# IMPORTANT - network_mode: host
+# All services use host networking. This means:
+#   - Containers share the host machine's network stack directly
+#   - Services talk to each other via 127.0.0.1 (localhost), not by container name
+#   - The `ports:` declarations below are informational only — with host networking,
+#     ports are not published by Docker. The service just binds to that port on the host.
+#   - Configure Prowlarr -> Sonarr/Radarr connections using http://localhost:<port>
+#
+# NOTE - PGID=100
+# PGID=100 is the "users" group on many NAS systems (e.g. QNAP, Synology).
+# On standard Linux, use PGID=1000. Run `id` on your host to find the right value.
+
+services:
+  prowlarr:
+    container_name: prowlarr
+    image: lscr.io/linuxserver/prowlarr:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000 # NOTE: Use 100 on NAS systems; 1000 on standard Linux
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+    ports:
+      - "9696:9696/tcp" # Informational only — host networking, not published by Docker
+    volumes:
+      - /opt/stacks/arr-stack/prowlarr:/config
+
+  sonarr1080:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr1080
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Your_Timezone
+    ports:
+      - "8990:8990" # Informational only — host networking
+    volumes:
+      - /opt/stacks/arr-stack/sonarr1080:/config
+      # NOTE: Media libraries — adjust paths to match your NAS/storage mount points
+      - /mnt/nas-media/TV Shows:/_tvShows
+      - /mnt/nas-media/Documentary:/_documentaryRealityTV
+      # Downloads folder — Sonarr needs full read/write access to move completed files
+      - /mnt/nas-media/Downloads:/downloads:rw
+
+  sonarr_anime:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr_anime
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Your_Timezone
+    ports:
+      # NOTE: Uses port 8991 to avoid conflict with sonarr1080 on 8990
+      - "8991:8991" # Informational only — host networking
+    volumes:
+      - /opt/stacks/arr-stack/sonarr_anime:/config
+      - /mnt/nas-media/Anime:/_anime
+      - /mnt/nas-media/Downloads:/downloads:rw
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:nightly
+    container_name: radarr
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Your_Timezone
+    ports:
+      - "7878:7878/tcp" # Informational only — host networking
+    volumes:
+      - /opt/stacks/arr-stack/radarr:/config
+      - /mnt/nas-media/Movies:/_movies
+      - /mnt/nas-media/Movies 4K:/_4kMovies
+      - /mnt/nas-media/Anime Movies:/_animeMovies
+      - /mnt/nas-media/Downloads:/downloads:rw
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Your_Timezone
+    ports:
+      - "6767:6767/tcp" # Informational only — host networking
+    volumes:
+      - /opt/stacks/arr-stack/bazarr:/config
+      # NOTE: Bazarr needs access to all media libraries to download and match subtitles
+      - /mnt/nas-media/TV Shows:/_tvShows
+      - /mnt/nas-media/TV Shows 4K:/_4ktvShows
+      - /mnt/nas-media/Documentary:/_documentaryRealityTV
+      - /mnt/nas-media/Movies:/_movies
+      - /mnt/nas-media/Movies 4K:/_4kMovies
+      - /mnt/nas-media/Anime:/_anime
+      - /mnt/nas-media/Anime Movies:/_animeMovies

@@ -1,0 +1,34 @@
+# ytptube/compose.yaml
+# YTPTube — self-hosted yt-dlp web UI for downloading YouTube and other video content
+# https://github.com/ArabCoders/ytptube
+#
+# Local access only — not exposed via reverse proxy in this setup.
+#
+# NOTE - user: "0:0" (root)
+# Root is used to ensure write access to the downloads directory regardless of
+# how the host volume is owned. Change to "1000:1000" if your downloads directory
+# is owned by a standard user.
+
+services:
+  ytptube:
+    image: ghcr.io/arabcoders/ytptube:latest
+    container_name: ytptube
+    restart: unless-stopped
+    # NOTE: Running as root for reliable write access to the downloads volume.
+    # Change to "1000:1000" if your storage is owned by a standard user.
+    user: "0:0"
+    ports:
+      - "8081:8081" # Web UI — local access only
+    volumes:
+      - /opt/stacks/ytptube/config:/config:rw
+      # NOTE: Adjust to your preferred downloads directory
+      - /mnt/nas-media/Downloads/ytptube:/downloads:rw
+    tmpfs:
+      # Use tmpfs for /tmp to avoid writing temporary files to persistent storage
+      - /tmp
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

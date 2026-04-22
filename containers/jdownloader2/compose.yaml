@@ -1,0 +1,33 @@
+# jdownloader2/compose.yaml
+# JDownloader 2 — automated download manager with web UI
+# https://github.com/jlesage/docker-jdownloader-2
+#
+# Provides a browser-based GUI (port 5800) for managing direct downloads.
+# Local access only — not exposed via reverse proxy in this setup.
+#
+# NOTE - PUID/PGID = 0 (root)
+# Root is used here to ensure full read/write access to the downloads volume.
+# Change to PUID=1000 / PGID=1000 if your downloads directory is owned by a normal user.
+
+services:
+  jdownloader2:
+    image: jlesage/jdownloader-2
+    container_name: jdownloader2
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+    environment:
+      # NOTE: Root used for broad file system access across download directories.
+      # Safe for a home server; adjust if running in a shared environment.
+      - PUID=0
+      - PGID=0
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+    ports:
+      - "5800:5800" # Web-based GUI — local access only
+    volumes:
+      - /opt/stacks/jdownloader2/config:/config
+      # NOTE: Adjust the output path to your preferred downloads directory
+      - /mnt/nas-media/Downloads/jdownloader2:/output:rw

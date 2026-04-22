@@ -1,0 +1,43 @@
+# plex/compose.yaml
+# Plex Media Server — personal media streaming
+# https://hub.docker.com/r/linuxserver/plex
+#
+# IMPORTANT - PUID/PGID = 0 (root)
+# Root is required for hardware transcoding device access (/dev/dri).
+# Without root, the container cannot open the DRI device for Intel QSV / VA-API transcoding.
+# If you don't use hardware transcoding, set PUID/PGID to your normal user values.
+#
+# IMPORTANT - network_mode: host
+# Host networking is strongly recommended for Plex. It enables:
+#   - GDM (G'Day Mate) auto-discovery on your local network
+#   - Direct Play / Direct Stream without NAT overhead
+#   - Correct client IP detection for bandwidth throttling and access control
+
+services:
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    restart: always
+    network_mode: host # Required for local network discovery and best performance
+    devices:
+      # NOTE: /dev/dri exposes the host GPU for hardware transcoding (Intel QSV, VA-API).
+      # Remove this section if your host has no GPU or you don't want hardware transcoding.
+      - /dev/dri:/dev/dri
+    environment:
+      # IMPORTANT: Root required for /dev/dri device access (hardware transcoding).
+      # Change to PUID=1000 / PGID=1000 if not using hardware transcoding.
+      - PUID=0
+      - PGID=0
+      - VERSION=docker  # "docker" = use the image's bundled version; "latest" = auto-update
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+    volumes:
+      - /opt/stacks/plex/config:/config
+      # NOTE: Adjust these paths to your media library locations.
+      # These paths are registered as Plex library sections in the web UI.
+      - /mnt/nas-media/TV Shows:/_tvShows
+      - /mnt/nas-media/TV Shows 4K:/_4ktvShows
+      - /mnt/nas-media/Movies:/_movies
+      - /mnt/nas-media/Movies 4K:/_4kMovies
+      - /mnt/nas-media/Anime:/_anime
+      - /mnt/nas-media/Anime Movies:/_animeMovies
+      - /mnt/nas-media/Documentary:/_documentaryRealityTV

@@ -1,0 +1,141 @@
+# gluetun-downloads/compose.yaml
+# VPN-routed downloads: Gluetun + qBittorrent + SearXNG + Redis
+# https://github.com/qdm12/gluetun
+#
+# This stack includes:
+#   - gluetun:    VPN container — all other services route traffic through it
+#   - qbittorrent: torrent client — ALL traffic (including DNS) goes through VPN
+#   - searxng:    privacy-respecting metasearch engine — also VPN-routed
+#   - redis:      SearXNG cache — also VPN-routed (shares gluetun's network namespace)
+#
+# IMPORTANT - network_mode: "service:gluetun"
+# qbittorrent, searxng, and redis all use `network_mode: "service:gluetun"`.
+# This means they share the gluetun container's network namespace entirely:
+#   - All outbound traffic from these services goes through the VPN
+#   - Services communicate with each other via localhost (127.0.0.1), not by container name
+#   - Ports for ALL services are exposed through the gluetun container, not directly
+#   - If gluetun stops, the other services lose network connectivity immediately
+#
+# This configuration uses Private Internet Access (PIA) with OpenVPN.
+# For other VPN providers, see: https://github.com/qdm12/gluetun/wiki
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    cap_add:
+      # NET_ADMIN is required — gluetun creates a VPN tunnel interface (tun0)
+      - NET_ADMIN
+    networks:
+      - gluetun-network
+    environment:
+      - VPN_SERVICE_PROVIDER=private internet access  # Change to your VPN provider
+      - OPENVPN_USER=${OPENVPN_USER}       # SECRET: from .env — your VPN username
+      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD} # SECRET: from .env — your VPN password
+      # NOTE: Adjust regions to match your VPN provider's available servers
+      - SERVER_REGIONS=US West,US East,US California,US Florida
+      - VPN_TYPE=openvpn
+      - OPENVPN_PROTOCOL=udp
+      # DNS: Using Cloudflare directly instead of DNS-over-TLS (simpler, still private over VPN)
+      - DOT=off
+      - DNS_ADDRESS=1.1.1.1
+    ports:
+      # IMPORTANT: All service ports are exposed here through gluetun, not on the individual services.
+      # qbittorrent and searxng use network_mode: service:gluetun, so their ports must be declared here.
+      - "8089:8089/tcp" # qBittorrent Web UI
+      - "8080:8080/tcp" # SearXNG Web UI
+      # Uncomment to expose direct torrent port (required for incoming connections / better speeds):
+      # - "6881:6881/tcp"
+      # - "6881:6881/udp"
+    healthcheck:
+      test: ["CMD-SHELL", 'pgrep -f "/usr/bin/openvpn --config" || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - WEBUI_PORT=8089      # Must match the port exposed on gluetun above
+      - TORRENTING_PORT=6881
+    # NOTE: All qbittorrent traffic (including the web UI) routes through the VPN.
+    # This means the web UI is only accessible via the gluetun container's exposed port.
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    volumes:
+      - /opt/stacks/gluetun-downloads/qbittorrent:/config
+      - /mnt/nas-media/Downloads:/downloads:rw
+      # Optional: VueTorrent alternative web UI (mount the built files read-only)
+      # - /opt/stacks/gluetun-downloads/vuetorrent:/vuetorrent:ro
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    # NOTE: Routes through gluetun — all searches go via VPN
+    network_mode: "service:gluetun"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    volumes:
+      - /opt/stacks/gluetun-downloads/searxng:/etc/searxng:rw
+    environment:
+      - PUID=1000
+      - PGID=1000
+      # IMPORTANT: Use localhost — SearXNG shares the network namespace with gluetun,
+      # so all services are reachable on 127.0.0.1, not by container name
+      - SEARXNG_BASE_URL=http://localhost:8080
+      - SEARXNG_VALKEY_URL=redis://localhost:6379/0
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: docker.io/redis:7-alpine
+    container_name: searxng-redis
+    restart: unless-stopped
+    # NOTE: Routes through gluetun — shares gluetun's network namespace
+    network_mode: "service:gluetun"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    volumes:
+      - searxng-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      gluetun:
+        condition: service_healthy
+
+networks:
+  gluetun-network:
+    driver: bridge
+
+volumes:
+  searxng-redis-data:

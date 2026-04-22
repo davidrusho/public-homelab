@@ -1,0 +1,30 @@
+# flaresolverr/compose.yaml
+# FlareSolverr — proxy server to bypass Cloudflare and DDoS-GUARD protection
+# https://github.com/FlareSolverr/FlareSolverr
+#
+# Used by Prowlarr to access indexers that are protected by Cloudflare.
+# Configure in Prowlarr: Settings > Indexers > Add FlareSolverr proxy > http://flaresolverr:8191
+#
+# NOTE: FlareSolverr must be on the same Docker network as Prowlarr to be reachable
+# by container name. If Prowlarr uses host networking, use http://localhost:8191 instead.
+# In this setup, Prowlarr uses host networking, so point it to http://localhost:8191.
+
+services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}          # info or debug
+      - LOG_HTML=${LOG_HTML:-false}           # Set to true to log full HTML responses (verbose)
+      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none} # none by default; see docs for solver options
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+    ports:
+      - "8191:8191/tcp"
