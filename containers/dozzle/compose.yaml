@@ -1,0 +1,33 @@
+# dozzle/compose.yaml
+# Real-time container log viewer
+#
+# Services: dozzle
+# Ports:    8079 (web UI)
+#
+# Dozzle reads Docker logs directly via the socket - no storage, no state.
+# It's a read-only window into what your containers are doing right now.
+#
+# Setup: No .env required. Adjust TZ if needed.
+
+services:
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    ports:
+      - "8079:8080"
+    volumes:
+      # Read-only access to Docker socket for log streaming
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=America/Your_Timezone
+      # IMPORTANT: DOZZLE_ENABLE_SHELL grants terminal access to any running container
+      # from the Dozzle UI. Only enable on a trusted network - never expose this publicly.
+      - DOZZLE_ENABLE_SHELL=true
+      # Uncomment to also allow restarting/stopping containers from the UI
+      # - DOZZLE_ENABLE_ACTIONS=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M

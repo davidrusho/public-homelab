@@ -1,0 +1,114 @@
+# dockflare/compose.yaml
+# Cloudflare Tunnel manager with automatic Docker label discovery
+#
+# Services: dockflare, bridge-agent, redis
+# Ports:    5001 (dockflare web UI), 6380 localhost-only (redis, for debugging)
+# Networks: dockflare_network (internal), proxy-network (external, shared)
+#
+# Dockflare watches the Docker socket for containers with dockflare.* labels
+# and automatically creates/updates Cloudflare tunnel routes for them.
+# Credentials (Account ID, Zone ID, API token) are configured through the
+# dockflare web UI after first deploy - not stored in compose or .env.
+#
+# The bridge-agent sidecar solves a specific DNS problem: cloudflared runs as
+# a container spawned by dockflare, but it starts outside of proxy-network,
+# so it can't resolve container hostnames (mealie, audiobookshelf, etc.) by name.
+# bridge-agent polls every 30s and connects the cloudflared agent container to
+# proxy-network when it appears, then restarts it to pick up the new DNS.
+#
+# To expose a service via Cloudflare tunnel, add these labels to its compose.yaml:
+#   labels:
+#     - "dockflare.enable=true"
+#     - "dockflare.hostname=service.yourdomain.com"
+#     - "dockflare.service=http://container-name:port"
+#     - "dockflare.zonename=yourdomain.com"
+#
+# Setup: See .env.example. Deploy, then open the UI and add your Cloudflare credentials.
+
+networks:
+  dockflare_network:
+    # Internal network for communication between dockflare, redis, and bridge-agent
+    driver: bridge
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network.
+    # Also used by: caddy, uptime-kuma, and any service exposed via Cloudflare tunnel.
+    # Create if it doesn't exist: docker network create proxy-network
+
+services:
+  dockflare:
+    image: alplat/dockflare:stable
+    container_name: dockflare
+    restart: unless-stopped
+    networks:
+      - dockflare_network
+      - proxy-network
+    ports:
+      - "5001:5000"
+    # NOTE: runs as root to access the Docker socket directly.
+    # A docker-socket-proxy would be more secure but caused connectivity issues.
+    user: "0:0"
+    volumes:
+      - /opt/stacks/dockflare/data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DOCKFLARE_DOCKER_HOST=unix:///var/run/docker.sock
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - TZ=America/Your_Timezone
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Keeps the dockflare-spawned cloudflared agent connected to proxy-network
+  # so it can resolve container hostnames by name (not just by IP).
+  # Without this, tunneled services return connection errors after cloudflared restarts.
+  bridge-agent:
+    image: docker:cli
+    container_name: dockflare-bridge-agent
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        AGENT=cloudflared-agent-dockflare-tunnel
+        NET=proxy-network
+        echo "Bridge agent started"
+        while true; do
+          if docker ps --format '{{.Names}}' | grep -qx "$$AGENT"; then
+            if ! docker network inspect "$$NET" --format '{{range .Containers}}{{.Name}} {{end}}' | grep -qw "$$AGENT"; then
+              echo "$$(date) - connecting $$AGENT to $$NET"
+              docker network connect "$$NET" "$$AGENT" 2>/dev/null && docker restart "$$AGENT"
+            fi
+          fi
+          sleep 30
+        done
+    networks:
+      - dockflare_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: dockflare-redis
+    restart: unless-stopped
+    networks:
+      dockflare_network:
+        aliases:
+          - redis
+          - redis-server
+    ports:
+      # Bound to localhost only - redis is not meant to be externally accessible
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - /opt/stacks/dockflare/redis:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true

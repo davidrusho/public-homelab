@@ -1,0 +1,62 @@
+# uptime-kuma/compose.yaml
+# Self-hosted uptime and status monitoring
+#
+# Services: uptime-kuma
+# Ports:    3002 (web UI)
+# Networks: proxy-network (external) - for reverse proxy access
+#
+# Uptime Kuma monitors services via HTTP, TCP, DNS, ping, and more.
+# Create your admin account on first visit to the web UI.
+#
+# Setup: See .env.example. No secrets required to start.
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "3002:3001"
+    volumes:
+      - /opt/stacks/uptime-kuma/data:/app/data
+    networks:
+      # NETWORK: Shared reverse-proxy network.
+      # Also used by: caddy, dockflare, homepage, and any service
+      # that needs to be reachable via reverse proxy or Cloudflare tunnel.
+      - proxy-network
+    environment:
+      - PUID=1000
+      # NOTE: PGID=1000 is standard on most Linux systems.
+      # Use PGID=100 if running on a QNAP (users group).
+      - PGID=1000
+      - TZ=America/Your_Timezone
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    # Prevent swap usage - keeps response times consistent
+    mem_swappiness: 0
+    # Lower CPU scheduling priority than default (1024)
+    cpu_shares: 512
+    healthcheck:
+      test: ["CMD", "node", "extra/healthcheck.js"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Optional: expose via Cloudflare tunnel through dockflare
+    # labels:
+    #   - "dockflare.enable=true"
+    #   - "dockflare.hostname=uptime.yourdomain.com"
+    #   - "dockflare.service=http://uptime-kuma:3001"
+    #   - "dockflare.zonename=yourdomain.com"
+
+networks:
+  proxy-network:
+    external: true
+    # NETWORK: Create this network before deploying if it doesn't exist:
+    # docker network create proxy-network

@@ -1,0 +1,57 @@
+# homepage/compose.yaml
+# Service dashboard - shows all services, their status, and links
+#
+# Services: homepage
+# Ports:    3000 (web UI)
+# Networks: host (required for container auto-discovery via Docker socket)
+#
+# Homepage reads service configs from YAML files in its /config volume.
+# The Docker socket mount enables automatic container status widgets.
+#
+# Config files live on the host at your chosen config path - not managed here.
+# See https://gethomepage.dev/configs/ for the full config reference.
+#
+# Setup: See .env.example. API keys for service widgets are optional - homepage
+# works fine without them, widgets just won't show live stats.
+
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+    # NOTE: network_mode: host is required for Docker socket auto-discovery
+    # to resolve container names correctly. Remove if you don't use the Docker
+    # integration widget and prefer a named network instead.
+    network_mode: host
+    ports:
+      - "3000:3000"
+    volumes:
+      # Homepage config files (services.yaml, settings.yaml, widgets.yaml, etc.)
+      - /opt/stacks/homepage/config:/config
+      # Read-only Docker socket for container status widgets
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # IMPORTANT: Restricts which hostnames can access the homepage.
+      # Replace * with your actual hostname/IP in production.
+      - HOMEPAGE_ALLOWED_HOSTS=*
+      - PUID=1000
+      # NOTE: PGID=1000 is standard on most Linux systems.
+      # Use PGID=100 if running on a QNAP (users group).
+      - PGID=1000
+      - TZ=America/Your_Timezone
+      # --- Optional: API keys for service widgets ---
+      # Uncomment and add to .env to enable live stats on the dashboard.
+      # Each key is fetched from the respective service's settings page.
+      # - HOMEPAGE_VAR_PLEX_KEY=${HOMEPAGE_VAR_PLEX_KEY}
+      # - HOMEPAGE_VAR_SONARR_KEY=${HOMEPAGE_VAR_SONARR_KEY}
+      # - HOMEPAGE_VAR_RADARR_KEY=${HOMEPAGE_VAR_RADARR_KEY}
+      # - HOMEPAGE_VAR_PROWLARR_KEY=${HOMEPAGE_VAR_PROWLARR_KEY}
+      # - HOMEPAGE_VAR_BAZARR_KEY=${HOMEPAGE_VAR_BAZARR_KEY}
+      # - HOMEPAGE_VAR_QBITTORRENT_USERNAME=${HOMEPAGE_VAR_QBITTORRENT_USERNAME}
+      # - HOMEPAGE_VAR_QBITTORRENT_PASSWORD=${HOMEPAGE_VAR_QBITTORRENT_PASSWORD}
+      # - HOMEPAGE_VAR_KAVITA_USERNAME=${HOMEPAGE_VAR_KAVITA_USERNAME}
+      # - HOMEPAGE_VAR_KAVITA_PASSWORD=${HOMEPAGE_VAR_KAVITA_PASSWORD}
+      # - HOMEPAGE_VAR_MEALIE_KEY=${HOMEPAGE_VAR_MEALIE_KEY}
+      # - HOMEPAGE_VAR_HOMEASSISTANT_KEY=${HOMEPAGE_VAR_HOMEASSISTANT_KEY}
+      # - HOMEPAGE_VAR_TAUTULLI_KEY=${HOMEPAGE_VAR_TAUTULLI_KEY}
+      # - HOMEPAGE_VAR_OVERSEERR_KEY=${HOMEPAGE_VAR_OVERSEERR_KEY}

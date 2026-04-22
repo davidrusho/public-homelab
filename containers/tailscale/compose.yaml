@@ -1,0 +1,54 @@
+# tailscale/compose.yaml
+# Tailscale VPN node - gives your Docker host a Tailscale IP
+#
+# Services: tailscale
+# Networks: host (required - Tailscale needs full network stack access)
+#
+# With network_mode: host, every port on the Docker host becomes reachable
+# from any device on your Tailscale network. No per-service configuration
+# needed - if a port is open on the host, it's accessible via Tailscale.
+#
+# State is stored in a named Docker volume - do NOT store on NFS.
+# The volume contains node keys that must survive NFS outages.
+#
+# First deploy:
+#   1. Add TS_AUTHKEY to your .env (one-time auth key, expires after use)
+#   2. docker compose up -d
+#   3. Approve the new node in your Tailscale admin console
+#   4. The auth key is no longer needed after the node is registered
+#
+# Setup: See .env.example for required secrets.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname: ${TAILSCALE_HOSTNAME:-docker-host}
+    restart: unless-stopped
+    # IMPORTANT: host networking is required for Tailscale to manage routes
+    # and make all host ports reachable via the Tailscale IP.
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      # /dev/net/tun is required for VPN tunnel creation.
+      # It exists by default on most Linux distros (Ubuntu, Debian, etc.).
+      # On QNAP: mkdir -p /dev/net && mknod /dev/net/tun c 10 200 && chmod 600 /dev/net/tun
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      # Named volume keeps node keys safe across restarts and host reboots.
+      # Do not change to a bind mount on NFS - keys must be local.
+      - tailscale-state:/var/lib/tailscale
+    environment:
+      # SECRET: One-time auth key from https://login.tailscale.com/admin/settings/keys
+      # Generate as: reusable=no, expiry=1 day. Only needed for initial node registration.
+      - TS_AUTHKEY=${TAILSCALE_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_HOSTNAME=${TAILSCALE_HOSTNAME:-docker-host}
+      # Optional: pass extra tailscaled flags (e.g. --advertise-routes=192.168.x.x/24)
+      - TS_EXTRA_ARGS=${TAILSCALE_EXTRA_ARGS:-}
+
+volumes:
+  tailscale-state:
+    driver: local
