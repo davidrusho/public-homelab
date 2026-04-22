@@ -1,0 +1,22 @@
+# discoflix/compose.yaml
+# Discoflix — Discord bot for requesting movies, TV shows, and anime
+# https://github.com/nickheyer/Discoflix
+#
+# Members send requests via Discord commands; Discoflix passes them to Radarr/Sonarr.
+# Configure your Discord bot token, Radarr/Sonarr API keys, and server ID through
+# the web UI at http://your-host:5454 after first launch.
+
+services:
+  discoflix:
+    image: nickheyer/discoflix:latest
+    container_name: discoflix
+    restart: unless-stopped
+    ports:
+      - "5454:5454" # Web UI for configuration
+    volumes:
+      - /opt/stacks/discoflix/data:/app/data
+    environment:
+      - PUID=1000
+      # NOTE: PGID=100 is the "users" group on many NAS systems. Use 1000 on standard Linux.
+      - PGID=1000
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)

@@ -1,0 +1,66 @@
+# caddy/compose.yaml
+# Caddy — reverse proxy for local HTTPS access to homelab services
+# https://caddyserver.com/docs/
+#
+# This Caddy instance provides local HTTPS using a self-signed CA (Caddy's automatic
+# HTTPS with internal certificates). It proxies requests to services on the Docker
+# host and other containers.
+#
+# NOTE: Caddy joins multiple external Docker networks so it can reach services by
+# container name across stacks. Each `external: true` network below is created by
+# another stack in this repo. Add or remove networks to match the services you run.
+#
+# NOTE: `host.docker.internal` is mapped to the host IP so Caddy can proxy to
+# services using host networking (e.g. Plex, Jellyfin, Home Assistant, the *arr suite).
+# Update the IP in `extra_hosts` to match your Docker host's LAN IP address.
+
+services:
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 support
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - proxy-network          # NETWORK: Main shared reverse-proxy network (see containers/dockflare)
+      - dockflare_dockflare_network  # Reach Dockflare by container name
+      - gluetun_gluetun-network      # Reach SearXNG (VPN-routed, exposed via gluetun)
+      # Add more external networks here for any other service stacks you want to proxy:
+      # - jellyfin_jellyfin_network
+      # - mealie_mealie_network
+    volumes:
+      - /opt/stacks/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/stacks/caddy/data:/data
+      - /opt/stacks/caddy/config:/config
+    environment:
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+      - PUID=1000
+      # NOTE: PGID=100 is the "users" group on many NAS systems. Use 1000 on standard Linux.
+      - PGID=1000
+    hostname: caddy
+    extra_hosts:
+      # IMPORTANT: Map the host IP so Caddy can proxy to host-networked services.
+      # Replace 192.168.x.x with your Docker host's LAN IP address.
+      # Services using network_mode: host (Plex, Jellyfin, Home Assistant, *arr)
+      # are only reachable via this host IP from within the container.
+      - "host.docker.internal:192.168.x.x"
+
+networks:
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also joined by: dockflare, mealie, karakeep, vikunja, etc.
+  dockflare_dockflare_network:
+    external: true
+    # Created by the dockflare stack (containers/dockflare)
+  gluetun_gluetun-network:
+    external: true
+    # Created by the gluetun-downloads stack (containers/gluetun-downloads)
+    # Allows Caddy to proxy to SearXNG (which runs inside gluetun's network namespace)

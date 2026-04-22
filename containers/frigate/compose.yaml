@@ -1,0 +1,91 @@
+# frigate/compose.yaml
+# Frigate NVR — self-hosted AI-powered security camera system
+# https://docs.frigate.video/frigate/installation
+#
+# IMPORTANT - camera configuration is NOT included in this repo.
+# Camera streams, detection zones, recording schedules, and hardware
+# accelerator device paths are all defined in config/config.yml, which
+# contains site-specific information (internal IP addresses, RTSP URLs,
+# camera credentials). Create your own config.yml — see:
+# https://docs.frigate.video/configuration/
+#
+# IMPORTANT - privileged mode
+# `privileged: true` is required for Frigate to access hardware accelerators
+# (Intel QSV, Coral TPU, Nvidia GPU) and certain device files. If you are only
+# using CPU-based detection, you may be able to drop `privileged: true` and instead
+# add specific device entries under `devices:`.
+#
+# This stack also includes an optional Komodo Periphery agent for remote deployment.
+# If you don't use Komodo, remove the `periphery` service entirely.
+
+services:
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:stable
+    container_name: frigate
+    restart: unless-stopped
+    # IMPORTANT: Required for hardware accelerator access (Coral TPU, Intel QSV, etc.)
+    # See https://docs.frigate.video/frigate/installation for device-specific config.
+    privileged: true
+    # NOTE: shm_size provides shared memory for decoded video frames between
+    # Frigate's processes. Size depends on your camera count and resolution.
+    # 512MB handles ~4-6 1080p cameras. Increase for more cameras or higher resolution.
+    shm_size: "512mb"
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"     # Web UI and REST API
+      - "8554:8554"     # RTSP restream (re-stream camera feeds to other services)
+      - "8555:8555/tcp" # WebRTC (for low-latency live view in the browser)
+      - "8555:8555/udp"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      # NOTE: Place your config.yml here. This file is NOT included in this repo —
+      # it contains your camera streams and site-specific configuration.
+      - /opt/stacks/frigate/config:/config
+      # NOTE: Recordings storage — use a large, fast drive. HDD is fine for recordings.
+      # Adjust to your storage mount point.
+      - /mnt/frigate-recordings:/media/frigate
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          # 1GB tmpfs cache for frame decoding. Increase if you see frame drop warnings.
+          size: 1000000000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/version"]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+      start_period: 2m
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # periphery: Komodo deployment agent — OPTIONAL
+  # Only needed if you manage deployments with Komodo (https://komo.do).
+  # Remove this service if you deploy manually or use a different tool.
+  # Bootstrap: deploy this manually once via SSH, then register the server in Komodo UI.
+  periphery:
+    image: ghcr.io/moghtech/komodo-periphery:latest
+    container_name: komodo-periphery
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc
+      - /opt/komodo-periphery/root:/etc/komodo
+    ports:
+      - "8120:8120"
+    environment:
+      PERIPHERY_ROOT_DIRECTORY: /opt/komodo-periphery/root
+      # SECRET: Must match the passkey configured in your Komodo core server
+      PERIPHERY_PASSKEYS: ${KOMODO_PASSKEY}
+      PERIPHERY_DISABLE_TERMINALS: "false"
+      PERIPHERY_SSL_ENABLED: "true"
+      PERIPHERY_LOGGING_PRETTY: "true"
+      TZ: America/Your_Timezone # NOTE: Change to your timezone
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

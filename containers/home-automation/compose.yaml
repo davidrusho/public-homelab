@@ -1,0 +1,133 @@
+# home-automation/compose.yaml
+# Home automation stack: Home Assistant + MQTT + Zigbee + Govee
+# https://www.home-assistant.io/installation/alternative/
+#
+# This stack includes:
+#   - homeassistant: the Home Assistant core application
+#   - mosquitto:     Eclipse Mosquitto MQTT broker (message bus for all HA integrations)
+#   - zigbee2mqtt:   bridges your Zigbee USB coordinator to MQTT (no Zigbee hub required)
+#   - govee2mqtt:    bridges Govee smart devices to MQTT via the Govee cloud API
+#
+# IMPORTANT - network_mode: host
+# All services use host networking so they can communicate via localhost (127.0.0.1).
+# Home Assistant discovers other services on the host network directly.
+# Zigbee2MQTT and govee2mqtt publish device data to Mosquitto via localhost:1883.
+#
+# HARDWARE REQUIREMENT - Zigbee USB coordinator
+# zigbee2mqtt requires a Zigbee USB coordinator plugged into the host.
+# Find your device path with: ls -la /dev/serial/by-id/
+# Common paths: /dev/ttyACM0 (ACM device), /dev/ttyUSB0 (USB-serial adapter)
+# Update the `devices:` section in zigbee2mqtt to match your coordinator path.
+# Tested with: Nabu Casa ZBT-2 (Silicon Labs EFR32MG21, ember adapter, 460800 baud)
+
+# Default settings applied to all services via YAML anchor
+x-default-settings: &default-settings
+  restart: always
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  homeassistant:
+    <<: *default-settings
+    container_name: homeassistant
+    image: lscr.io/linuxserver/homeassistant:latest
+    network_mode: host
+    environment:
+      - TZ=${TZ}             # NOTE: Set your timezone in .env (e.g. America/New_York)
+      # NOTE: Disable jemalloc if HA crashes on startup on your system.
+      # Known issue on some ARM/NAS platforms. Safe to remove on standard Linux x86.
+      - DISABLE_JEMALLOC=true
+    ports:
+      - "8123:8123" # Informational only — host networking
+    volumes:
+      - /opt/stacks/home-automation/home-assistant:/config
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123"]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+      start_period: 3m
+
+  mosquitto:
+    <<: *default-settings
+    container_name: mosquitto
+    image: eclipse-mosquitto
+    network_mode: host
+    volumes:
+      # NOTE: Comment out the certs and config volumes on first run if you have not yet
+      # created your mosquitto.conf. Start with only the data and log volumes, then
+      # add the config volume once mosquitto.conf is in place.
+      - /opt/stacks/home-automation/mosquitto/certs:/mosquitto/config/certs
+      - /opt/stacks/home-automation/mosquitto/config:/mosquitto/config
+      - /opt/stacks/home-automation/mosquitto/data:/mosquitto/data
+      - /opt/stacks/home-automation/mosquitto/log:/mosquitto/log
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+
+  zigbee2mqtt:
+    <<: *default-settings
+    container_name: zigbee2mqtt
+    image: koenkk/zigbee2mqtt
+    network_mode: host
+    depends_on:
+      - mosquitto
+    devices:
+      # IMPORTANT: Update this path to match your Zigbee USB coordinator device.
+      # Find it with: ls -la /dev/serial/by-id/
+      # Common paths: /dev/ttyACM0 (ACM), /dev/ttyUSB0 (USB-serial)
+      - /dev/ttyACM0
+    volumes:
+      - /opt/stacks/home-automation/zigbee2mqtt:/app/data
+      # udev access allows zigbee2mqtt to detect USB device hot-plug events
+      - /run/udev:/run/udev:ro
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.2'
+
+  govee2mqtt:
+    <<: *default-settings
+    image: ghcr.io/wez/govee2mqtt:latest
+    container_name: govee2mqtt
+    network_mode: host
+    environment:
+      - GOVEE_API_KEY=${GOVEE_API_KEY}                       # SECRET: from .env — Govee developer API key
+      - GOVEE_EMAIL=${GOVEE_EMAIL}                           # SECRET: from .env — Govee account email
+      - GOVEE_PASSWORD=${GOVEE_PASSWORD}                     # SECRET: from .env — Govee account password
+      # IMPORTANT: Use 127.0.0.1 — host networking means Mosquitto is on localhost
+      - GOVEE_MQTT_HOST=${GOVEE_MQTT_HOST}                   # Set to 127.0.0.1 in .env
+      - GOVEE_MQTT_PORT=${GOVEE_MQTT_PORT}                   # Default: 1883
+      - GOVEE_MQTT_TLS=${GOVEE_MQTT_TLS}                     # true or false
+      - GOVEE_TEMPERATURE_SCALE=${GOVEE_TEMPERATURE_SCALE}   # C or F
+      - MQTT_BROKER=${MQTT_BROKER}                           # Set to 127.0.0.1 in .env
+      - RUST_LOG_STYLE=${RUST_LOG_STYLE}                     # auto or never
+      - TZ=${TZ}
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.3'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
