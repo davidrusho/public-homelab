@@ -1,0 +1,47 @@
+# audiobookshelf/compose.yaml
+# Audiobookshelf — self-hosted audiobook and podcast server
+# https://www.audiobookshelf.org/docs#docker-compose-install
+#
+# Media directories are mounted from NAS. Adjust paths to match your setup.
+# Dockflare labels are included for automatic Cloudflare tunnel routing.
+# See: https://github.com/davidrusho/public-homelab/tree/main/containers/dockflare
+
+services:
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    restart: unless-stopped
+    ports:
+      - "13378:80"
+    environment:
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+      # NOTE: PUID/PGID control file ownership for config and metadata volumes.
+      # Run `id` on your host to find the right values.
+      # PGID=100 is the "users" group on many NAS systems — use 1000 for standard Linux.
+      - PUID=1000
+      - PGID=1000
+    labels:
+      # Dockflare: automatic Cloudflare tunnel routing
+      - "dockflare.enable=true"
+      - "dockflare.hostname=audiobookshelf.yourdomain.com"
+      - "dockflare.service=http://audiobookshelf:80"
+      - "dockflare.zonename=yourdomain.com"
+    volumes:
+      - /opt/stacks/audiobookshelf/config:/config
+      - /opt/stacks/audiobookshelf/metadata:/metadata
+      # NOTE: Adjust these paths to your media library locations
+      - /mnt/nas-media/Audiobooks:/audiobooks
+      - /mnt/nas-media/Podcasts:/podcasts
+    networks:
+      - proxy-network # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage.
+    # Any service that needs to be accessible via reverse proxy joins this network.

@@ -1,0 +1,67 @@
+# spoolman/compose.yaml
+# Spoolman + SpoolmanSync — 3D printer filament spool inventory management
+# https://github.com/Donkie/Spoolman
+# https://github.com/Gibz104/SpoolmanSync (Bambu AMS sync)
+#
+# This stack includes:
+#   - spoolman: spool inventory tracker with web UI
+#   - spoolmansync: syncs Bambu Lab AMS filament data into Spoolman
+#
+# IMPORTANT: The host data directory for spoolman must be writable by UID/GID 1000.
+# Create it before starting: mkdir -p /opt/stacks/spoolman/data && chown 1000:1000 /opt/stacks/spoolman/data
+#
+# SpoolmanSync connects to Spoolman via the proxy-network (by container name or host port).
+# HA_MODE=external means SpoolmanSync does not use Home Assistant — it connects directly
+# to Bambu Lab printers via the Bambu cloud or MQTT.
+
+services:
+  spoolman:
+    image: ghcr.io/donkie/spoolman:latest
+    container_name: spoolman
+    restart: unless-stopped
+    ports:
+      - "7912:8000"
+    volumes:
+      # IMPORTANT: Must be writable by UID 1000 — see note above
+      - /opt/stacks/spoolman/data:/home/app/.local/share/spoolman
+    environment:
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+    networks:
+      - proxy-network # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+  spoolmansync:
+    image: ghcr.io/gibz104/spoolmansync:latest
+    container_name: spoolmansync
+    restart: unless-stopped
+    ports:
+      - "3003:3000"
+    environment:
+      # HA_MODE=external: connect directly to Bambu printers, no Home Assistant required
+      # HA_MODE=internal: use Home Assistant MQTT integration (requires HA config)
+      - HA_MODE=external
+    volumes:
+      - /opt/stacks/spoolmansync/data:/data
+    networks:
+      - proxy-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+networks:
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage.
+    # Any service that needs to be accessible via reverse proxy joins this network.

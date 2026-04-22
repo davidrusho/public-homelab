@@ -1,0 +1,160 @@
+# paperless-ngx/compose.yaml
+# Paperless-NGX — self-hosted document management and archiving
+# https://docs.paperless-ngx.com/setup/#docker
+#
+# This stack includes:
+#   - webserver: Paperless-NGX application
+#   - db: PostgreSQL 17 database
+#   - broker: Redis 8 message broker (required for task queue)
+#   - paperless-gpt: optional AI-assisted OCR and tagging via Ollama
+#
+# Documents are ingested from the consume volume. Drop files there and
+# Paperless will process them automatically. Configure via the web UI.
+#
+# paperless-gpt integrates with a local Ollama instance for AI OCR.
+# Remove that service if you don't have Ollama running on your network.
+
+services:
+  broker:
+    image: docker.io/library/redis:8
+    container_name: paperless-redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+    volumes:
+      - redisdata:/data
+
+  db:
+    image: docker.io/library/postgres:17
+    container_name: paperless-postgres
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    container_name: paperless-webserver
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+    depends_on:
+      db:
+        condition: service_healthy
+      broker:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    volumes:
+      - /opt/stacks/paperless/data:/usr/src/paperless/data
+      - /opt/stacks/paperless/media:/usr/src/paperless/media
+      - /opt/stacks/paperless/export:/usr/src/paperless/export
+      # NOTE: The consume folder is where Paperless watches for new documents.
+      # Drop files here and they will be processed automatically.
+      - /opt/stacks/paperless/consume:/usr/src/paperless/consume
+    environment:
+      # --- Internal service connections ---
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_DBHOST: db
+      PAPERLESS_DBUSER: ${POSTGRES_USER}       # SECRET: from .env
+      PAPERLESS_DBPASS: ${POSTGRES_PASSWORD}   # SECRET: from .env
+      PAPERLESS_DBNAME: ${POSTGRES_DB}
+
+      # --- Polling (use if inotify doesn't work reliably in your environment) ---
+      PAPERLESS_CONSUMER_POLLING: 60           # Poll consume folder every 60 seconds
+      PAPERLESS_CONSUMER_USE_INOTIFY: false
+
+      # IMPORTANT: Must match the URL you access Paperless from
+      PAPERLESS_URL: ${PAPERLESS_URL}                             # SECRET: from .env
+      # IMPORTANT: Must include your Paperless URL to prevent CSRF errors
+      PAPERLESS_CSRF_TRUSTED_ORIGINS: ${PAPERLESS_CSRF_TRUSTED_ORIGINS} # SECRET: from .env
+
+      # --- Locale and ownership ---
+      PAPERLESS_TIME_ZONE: ${PAPERLESS_TIME_ZONE}   # e.g. America/New_York
+      PAPERLESS_OCR_LANGUAGE: ${PAPERLESS_OCR_LANGUAGE} # e.g. eng (English), deu (German)
+      # NOTE: USERMAP_UID/GID controls file ownership in the data/media/consume volumes.
+      # Run `id` on your host to find your UID and GID.
+      USERMAP_UID: ${USERMAP_UID}
+      USERMAP_GID: ${USERMAP_GID}
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+    networks:
+      - proxy-network # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage
+      - default
+
+  # paperless-gpt: AI-assisted OCR and automatic tag/title/correspondent suggestions
+  # Requires a running Ollama instance on your network with a vision-capable model.
+  # Remove this service if you don't use Ollama — Paperless works fine without it.
+  # https://github.com/icereed/paperless-gpt
+  paperless-gpt:
+    image: icereed/paperless-gpt:latest
+    container_name: paperless-gpt
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    depends_on:
+      webserver:
+        condition: service_started
+    environment:
+      PAPERLESS_BASE_URL: "http://paperless-webserver:8000"  # Internal URL — reaches webserver by container name
+      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN}            # SECRET: from .env — generate in Paperless admin
+      PAPERLESS_PUBLIC_URL: ${PAPERLESS_PUBLIC_URL}          # SECRET: from .env — your external Paperless URL
+      MANUAL_TAG: "paperless-gpt"       # Tag a document with this to trigger manual AI processing
+      AUTO_TAG: "paperless-gpt-auto"    # Documents tagged with this are processed automatically
+      LLM_PROVIDER: "ollama"
+      LLM_MODEL: "deepseek-ocr:latest"  # NOTE: Must be pulled in Ollama first: ollama pull deepseek-ocr
+      # NOTE: Replace with your Ollama host IP. Ollama typically listens on port 11434.
+      OLLAMA_HOST: "http://192.168.x.x:11434"
+      TOKEN_LIMIT: "1000"
+      OLLAMA_CONTEXT_LENGTH: "2048"
+      LLM_REQUESTS_PER_MINUTE: "10"
+      OCR_PROVIDER: "llm"
+      OCR_PROCESS_MODE: "image"
+      VISION_LLM_PROVIDER: "ollama"
+      VISION_LLM_MODEL: "deepseek-ocr:latest"
+      PDF_SKIP_EXISTING_OCR: "false"   # Set to "true" to skip re-OCRing already-processed PDFs
+    volumes:
+      - /opt/stacks/paperless-gpt/prompts:/app/prompts
+    ports:
+      - "8088:8080"
+    networks:
+      - proxy-network
+      - default
+
+networks:
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage.
+    # Any service that needs to be accessible via reverse proxy joins this network.
+  default:
+
+volumes:
+  pgdata:
+  redisdata:

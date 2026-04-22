@@ -1,0 +1,108 @@
+# karakeep/compose.yaml
+# Karakeep — self-hosted bookmarks and read-later with AI tagging
+# https://docs.karakeep.app/Installation/docker
+#
+# This stack includes:
+#   - web: Karakeep application (Next.js)
+#   - chrome: Browserless headless Chrome for page snapshots and full-text capture
+#   - meilisearch: Search engine for full-text search across bookmarks
+#
+# IMPORTANT: MEILI_MASTER_KEY must be the same in both the web and meilisearch
+# services. Generate once with `openssl rand -hex 32` and set in .env.
+
+name: karakeep-app
+
+services:
+  web:
+    image: ghcr.io/karakeep-app/karakeep:latest
+    container_name: karakeep
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
+    depends_on:
+      - chrome
+      - meilisearch
+    volumes:
+      - /opt/stacks/karakeep/data:/data
+    ports:
+      - "3001:3000"
+    environment:
+      MEILI_ADDR: http://meilisearch:7700          # Internal Meilisearch address — do not change
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}        # SECRET: from .env — must match meilisearch service
+      BROWSER_WEB_URL: http://chrome:3000          # Internal Chrome address — do not change
+      DATA_DIR: /data
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}          # SECRET: from .env — generate with `openssl rand -hex 32`
+    networks:
+      - karakeep_network
+      - proxy-network # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  chrome:
+    image: browserless/chrome:latest
+    container_name: karakeep-chrome
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    environment:
+      CONNECTION_TIMEOUT: 600000    # 10 minutes — allows time for slow pages to render
+      MAX_CONCURRENT_SESSIONS: 10
+      PREBOOT_CHROME: "true"        # Keep a Chrome instance warm to reduce first-request latency
+    networks:
+      - karakeep_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/json/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.13.3
+    container_name: karakeep-meilisearch
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    environment:
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY} # SECRET: from .env — must match web service
+    volumes:
+      - /opt/stacks/karakeep/meilisearch:/meili_data
+    networks:
+      - karakeep_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  karakeep_network:
+    driver: bridge
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage.
+    # Any service that needs to be accessible via reverse proxy joins this network.

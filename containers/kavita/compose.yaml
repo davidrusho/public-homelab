@@ -1,0 +1,38 @@
+# kavita/compose.yaml
+# Kavita — self-hosted digital library for books, comics, and manga
+# https://wiki.kavitareader.com/en/install/docker
+#
+# Kavita serves multiple library types from separate volume mounts.
+# Add or remove library mounts to match your collection structure.
+# All library paths are configured in the Kavita web UI after first launch.
+
+services:
+  kavita:
+    image: jvmilazz0/kavita:latest
+    container_name: kavita
+    restart: always
+    ports:
+      - "5000:5000"
+    networks:
+      - proxy-network # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage
+    environment:
+      - PUID=1000
+      # NOTE: PGID=100 is the "users" group on many NAS systems — use 1000 for standard Linux.
+      # Run `id` on your host to verify.
+      - PGID=1000
+      - TZ=America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+    volumes:
+      # NOTE: Add or remove library mounts to match your collection.
+      # Paths inside the container (/_books, /_comics, etc.) are referenced when
+      # you add libraries in the Kavita web UI.
+      - /mnt/nas-media/Books:/books
+      - /mnt/nas-media/Comics:/comics
+      - /mnt/nas-media/Manga:/manga
+      # Kavita config and database
+      - /opt/stacks/kavita/data:/kavita/config
+
+networks:
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage.
+    # Any service that needs to be accessible via reverse proxy joins this network.

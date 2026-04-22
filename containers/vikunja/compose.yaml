@@ -1,0 +1,94 @@
+# vikunja/compose.yaml
+# Vikunja — self-hosted project management and to-do app
+# https://vikunja.io/docs/docker-compose/
+#
+# This stack includes:
+#   - vikunja: the application (frontend + backend combined)
+#   - db: PostgreSQL 17 database
+#
+# NOTE: Vikunja is intentionally NOT exposed via Cloudflare tunnel in this setup.
+# External access is handled by Tailscale. Local access via http://docker-host-ip:3456.
+# If you want tunnel access, add Dockflare labels to the vikunja service.
+
+name: vikunja-app
+
+services:
+  vikunja:
+    image: vikunja/vikunja:latest
+    container_name: vikunja
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Database connection - points to the db service by container name
+      VIKUNJA_DATABASE_TYPE: postgres
+      VIKUNJA_DATABASE_HOST: db
+      VIKUNJA_DATABASE_USER: ${POSTGRES_USER}        # SECRET: from .env
+      VIKUNJA_DATABASE_PASSWORD: ${POSTGRES_PASSWORD} # SECRET: from .env
+      VIKUNJA_DATABASE_DATABASE: ${POSTGRES_DB}       # SECRET: from .env
+
+      # IMPORTANT: Public URL must match the URL your users access Vikunja from.
+      # Used for generated share links, email links, and redirect URIs.
+      # Use your reverse proxy URL if behind a proxy.
+      VIKUNJA_SERVICE_PUBLICURL: ${VIKUNJA_SERVICE_PUBLICURL} # SECRET: from .env
+
+      # IMPORTANT: VIKUNJA_SERVICE_JWTSECRET is deprecated — use VIKUNJA_SERVICE_SECRET.
+      # https://vikunja.io/docs/config-options/
+      VIKUNJA_SERVICE_SECRET: ${VIKUNJA_JWT_SECRET}   # SECRET: from .env — generate with `openssl rand -hex 32`
+
+      # Set to "false" to disable open registration (recommended for private instances)
+      VIKUNJA_SERVICE_ENABLEREGISTRATION: ${VIKUNJA_SERVICE_ENABLEREGISTRATION}
+
+      TZ: America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+
+    ports:
+      - "3456:3456"
+
+    volumes:
+      # User-uploaded file attachments
+      - /opt/stacks/vikunja/files:/app/vikunja/files
+
+    networks:
+      - vikunja_network
+      - proxy-network # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: postgres:17
+    container_name: vikunja-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: America/Your_Timezone
+    volumes:
+      # Named volume keeps data across container rebuilds
+      - /opt/stacks/vikunja/postgres:/var/lib/postgresql/data
+    networks:
+      - vikunja_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  vikunja_network:
+    driver: bridge
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage.
+    # Any service that needs to be accessible via reverse proxy joins this network.

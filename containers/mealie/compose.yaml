@@ -1,0 +1,115 @@
+# mealie/compose.yaml
+# Mealie — self-hosted recipe management and meal planning
+# https://docs.mealie.io/documentation/getting-started/installation/docker/
+#
+# This stack includes:
+#   - mealie: the application
+#   - postgres: PostgreSQL 15 database
+#
+# Google OIDC is configured for SSO login. Only pre-created users with matching
+# email addresses can login — automatic signup is disabled. To add users, create
+# them manually in the Mealie admin panel with the matching email address first.
+#
+# Dockflare labels are included for automatic Cloudflare tunnel routing.
+# See: https://github.com/davidrusho/public-homelab/tree/main/containers/dockflare
+
+services:
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:latest
+    container_name: mealie
+    restart: always
+    ports:
+      # Internal port 9000, exposed on host port 9925 to avoid conflicts
+      - "9925:9000"
+    deploy:
+      resources:
+        limits:
+          memory: 1000M
+    volumes:
+      - /opt/stacks/mealie/data:/app/data/
+    environment:
+      ALLOW_SIGNUP: "false"  # Disable local signup — OIDC handles auth
+      PUID: 1000             # NOTE: Run `id` on your host to find the right values
+      PGID: 1000
+      TZ: America/Your_Timezone # NOTE: Change to your timezone (e.g. America/New_York)
+      MAX_WORKERS: 1
+      WEB_CONCURRENCY: 1
+      SECURITY_MAX_LOGIN_ATTEMPTS: 5
+      SECURITY_USER_LOCKOUT_TIME: 1
+
+      # IMPORTANT: Must match the URL users access Mealie from (your reverse proxy URL)
+      BASE_URL: https://mealie.yourdomain.com
+
+      # --- Database Settings ---
+      DB_ENGINE: postgres
+      POSTGRES_USER: ${POSTGRES_USER}         # SECRET: from .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # SECRET: from .env
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TOKEN_TIME: 9600 # Session token lifetime in hours
+
+      # --- Google OIDC / SSO ---
+      # Skip this section if you don't use Google SSO — remove the OIDC_ vars
+      # and set ALLOW_SIGNUP: "true" to use local accounts instead.
+      OIDC_AUTH_ENABLED: true
+      OIDC_SIGNUP_ENABLED: false  # Disable automatic user creation — only pre-existing users can login
+      OIDC_PROVIDER_NAME: "Google" # Sets login button text
+
+      # Google's well-known OIDC discovery endpoint (no changes needed)
+      OIDC_CONFIGURATION_URL: "https://accounts.google.com/.well-known/openid-configuration"
+      OIDC_CLIENT_ID: ${GOOGLE_CLIENT_ID}     # SECRET: from .env — from Google Cloud Console
+      OIDC_CLIENT_SECRET: ${GOOGLE_SECRET}    # SECRET: from .env — from Google Cloud Console
+
+      OIDC_USER_CLAIM: "email"      # Use email to match existing Mealie accounts
+      OIDC_NAME_CLAIM: "name"
+      OIDC_SIGNING_ALGORITHM: "RS256"
+      OIDC_AUTO_REDIRECT: true   # Redirect directly to Google login (skip Mealie login page)
+      OIDC_REMEMBER_ME: true     # Extend sessions automatically
+
+    networks:
+      - mealie_network
+      - proxy-network # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage
+    labels:
+      # Dockflare: automatic Cloudflare tunnel routing
+      - "dockflare.enable=true"
+      - "dockflare.hostname=mealie.yourdomain.com"
+      - "dockflare.service=http://mealie:9000"   # Internal port, not host port
+      - "dockflare.zonename=yourdomain.com"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    container_name: mealie-postgres
+    image: postgres:15
+    restart: always
+    volumes:
+      - mealie-pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGUSER: ${POSTGRES_USER} # Required for pg_isready healthcheck to authenticate correctly
+    healthcheck:
+      test: ["CMD", "pg_isready"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - mealie_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mealie-pgdata:
+
+networks:
+  mealie_network:
+    driver: bridge
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage.
+    # Any service that needs to be accessible via reverse proxy joins this network.

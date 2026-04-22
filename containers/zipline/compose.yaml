@@ -1,0 +1,80 @@
+# zipline/compose.yaml
+# Zipline — self-hosted file sharing with direct links and media playback
+# https://zipline.diced.sh/docs/get-started/docker
+#
+# This stack includes:
+#   - zipline-postgres: PostgreSQL 16 database
+#   - zipline: the application
+#
+# Dockflare labels are included for automatic Cloudflare tunnel routing.
+# See: https://github.com/davidrusho/public-homelab/tree/main/containers/dockflare
+
+services:
+  zipline-postgres:
+    image: postgres:16
+    container_name: zipline-postgres
+    restart: unless-stopped
+    networks:
+      - zipline_network
+    environment:
+      POSTGRES_USER: zipline
+      POSTGRES_PASSWORD: ${POSTGRESQL_PASSWORD:?POSTGRESQL_PASSWORD is required} # SECRET: from .env
+      POSTGRES_DB: zipline
+    volumes:
+      - /opt/stacks/zipline/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "zipline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  zipline:
+    image: ghcr.io/diced/zipline
+    container_name: zipline
+    restart: unless-stopped
+    networks:
+      - zipline_network  # Reaches zipline-postgres by container name
+      - proxy-network    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage
+    ports:
+      - "3030:3000"
+    environment:
+      # NOTE: DATABASE_URL embeds the password inline — it is sourced from .env via the variable
+      - DATABASE_URL=postgres://zipline:${POSTGRESQL_PASSWORD}@zipline-postgres:5432/zipline
+      # IMPORTANT: CORE_SECRET must be at least 32 characters — generate with `openssl rand -hex 32`
+      - CORE_SECRET=${ZIPLINE_CORE_SECRET:?ZIPLINE_CORE_SECRET is required} # SECRET: from .env
+    depends_on:
+      zipline-postgres:
+        condition: service_healthy
+    volumes:
+      - /opt/stacks/zipline/uploads:/zipline/uploads
+      - /opt/stacks/zipline/public:/zipline/public
+      - /opt/stacks/zipline/themes:/zipline/themes
+    labels:
+      # Dockflare: automatic Cloudflare tunnel routing
+      - "dockflare.enable=true"
+      - "dockflare.hostname=zipline.yourdomain.com"
+      - "dockflare.service=http://zipline:3000"  # Internal port, not host port
+      - "dockflare.zonename=yourdomain.com"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/healthcheck"]
+      interval: 15s
+      timeout: 2s
+      retries: 2
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  zipline_network:
+    driver: bridge
+  proxy-network:
+    external: true
+    # NETWORK: Shared reverse-proxy network. Also used by: caddy, dockflare, homepage.
+    # Any service that needs to be accessible via reverse proxy joins this network.
