@@ -1,0 +1,30 @@
+# Secrets - never commit real values
+.env
+*.env
+**/.env
+
+# Secret files
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# SOPS encrypted files (if ever used)
+*.enc.yaml
+*.enc.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
