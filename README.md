@@ -76,11 +76,13 @@ Your setup will differ - the comments in each compose file explain decisions tha
 
 ## Blog Posts Using This Repo
 
-Posts that reference specific stacks will be linked here as they are published.
+Posts that reference specific stacks are linked here as they are published.
 
 | Post | Stack |
 |---|---|
-| (coming soon) | |
+| [My $130/Year Evernote Replacement: Paperless-ngx + GitOps](https://thehomelab.lol/articles/paperless-ngx-evernote-replacement/) | [`containers/paperless-ngx`](containers/paperless-ngx) |
+| [Using a Local LLM to Auto-File Documents](https://thehomelab.lol/articles/paperless-ai-pipeline/) | [`containers/paperless-ngx`](containers/paperless-ngx) |
+| [Give Claude Code CLI a Status HUD (claude-hud)](https://thehomelab.lol/articles/claude-code-statusline-hud/) | [`scripts/claude-hud-statusline-wrapper`](scripts/claude-hud-statusline-wrapper) |
 
 ---
 

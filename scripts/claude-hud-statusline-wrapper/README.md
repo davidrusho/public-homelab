@@ -4,6 +4,8 @@ A Python wrapper that post-processes the [claude-hud](https://github.com/jarrodw
 statusline plugin for Claude Code, adding line labels, a continuous color gradient on the
 progress bars, and a few readability edits that the plugin does not expose as config.
 
+Write-up: [Give Claude Code CLI a Status HUD (claude-hud)](https://thehomelab.lol/articles/claude-code-statusline-hud/).
+
 claude-hud does the hard part: reading Claude Code's statusline JSON and rendering context
 usage, rate-limit windows, tool activity, running agents, todos, and git state. This wrapper
 only rewrites the text it prints.
